@@ -8,7 +8,7 @@
     <artifactId>ruoyi-flowable-plus</artifactId>
     <version>0.8.3</version>
 
-    <name>RuoYi-Flowable-Plus</name>
+    <name>flowable</name>
     <url>https://gitee.com/KonBAI-Q/ruoyi-flowable-plus</url>
     <description>后台管理系统</description>
 

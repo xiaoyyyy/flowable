@@ -26,6 +26,7 @@ import com.ruoyi.flowable.core.FormConf;
 import com.ruoyi.flowable.core.domain.ProcessQuery;
 import com.ruoyi.flowable.factory.FlowServiceFactory;
 import com.ruoyi.flowable.flow.FlowableUtils;
+import com.ruoyi.flowable.flow.PredictNodeUtil;
 import com.ruoyi.flowable.utils.ModelUtils;
 import com.ruoyi.flowable.utils.ProcessFormUtils;
 import com.ruoyi.flowable.utils.ProcessUtils;
@@ -673,6 +674,14 @@ public class WfProcessServiceImpl extends FlowServiceFactory implements IWfProce
         detailVo.setHistoryProcNodeList(historyProcNodeList(historicProcIns));
         detailVo.setProcessFormList(processFormList(bpmnModel, historicProcIns));
         detailVo.setFlowViewer(getFlowViewer(bpmnModel, procInsId));
+        // 发起时预演确定的后续会执行节点列表
+        Map<String, Object> procVars = historicProcIns.getProcessVariables();
+        if (CollUtil.isNotEmpty(procVars)) {
+            Object predictNodesVar = procVars.get(ProcessConstants.PROCESS_PREDICT_NODES_KEY);
+            if (ObjectUtil.isNotNull(predictNodesVar)) {
+                detailVo.setPredictNodeList(JsonUtils.parseArray(Convert.toStr(predictNodesVar), WfNextNodeVo.class));
+            }
+        }
         return detailVo;
     }
 
@@ -693,10 +702,34 @@ public class WfProcessServiceImpl extends FlowServiceFactory implements IWfProce
         variables.put(BpmnXMLConstants.ATTRIBUTE_EVENT_START_INITIATOR, userIdStr);
         // 设置流程状态为进行中
         variables.put(ProcessConstants.PROCESS_STATUS_KEY, ProcessStatus.RUNNING.getStatus());
+        // 预演后续会真正执行的节点，随实例持久化（不会执行的分支不收集）
+        variables.put(ProcessConstants.PROCESS_PREDICT_NODES_KEY,
+            JsonUtils.toJsonString(buildPredictNodes(procDef.getId(), variables)));
         // 发起流程实例
         ProcessInstance processInstance = runtimeService.startProcessInstanceByKeyAndTenantId(procDef.getKey(), variables,"AMS");
         // 第一个用户任务为发起人，则自动完成任务
         wfTaskService.startFirstTask(processInstance, variables);
+    }
+
+    /**
+     * 基于流程定义与发起变量，预演出后续会真正执行到的用户任务节点（按流转顺序）。
+     *
+     * @param procDefId 流程定义ID
+     * @param variables 发起变量
+     * @return 预演节点列表
+     */
+    private List<WfNextNodeVo> buildPredictNodes(String procDefId, Map<String, Object> variables) {
+        List<WfNextNodeVo> nodes = new ArrayList<>();
+        BpmnModel bpmnModel = repositoryService.getBpmnModel(procDefId);
+        List<UserTask> userTasks = PredictNodeUtil.predict(bpmnModel, variables);
+        for (UserTask userTask : userTasks) {
+            WfNextNodeVo vo = new WfNextNodeVo();
+            vo.setNodeKey(userTask.getId());
+            vo.setNodeName(userTask.getName());
+            vo.setMultiInstance(userTask.getLoopCharacteristics() != null);
+            nodes.add(vo);
+        }
+        return nodes;
     }
 
 

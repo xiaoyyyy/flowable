@@ -38,6 +38,11 @@ public class WfDetailVo {
     private WfViewerVo flowViewer;
 
     /**
+     * 流程发起时预演确定的后续会执行的节点列表（按流转顺序，不会执行的分支不包含）
+     */
+    private List<WfNextNodeVo> predictNodeList;
+
+    /**
      * 是否存在任务表单信息
      * @return true:存在；false:不存在
      */

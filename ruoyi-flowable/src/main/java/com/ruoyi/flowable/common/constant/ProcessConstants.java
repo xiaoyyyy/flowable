@@ -72,6 +72,11 @@ public class ProcessConstants {
      */
     public static final String PROCESS_STATUS_KEY = "processStatus";
 
+    /**
+     * 流程发起时预演确定的后续用户任务节点（JSON 字符串）
+     */
+    public static final String PROCESS_PREDICT_NODES_KEY = "processPredictNodes";
+
 
     /**
      * 流程跳过

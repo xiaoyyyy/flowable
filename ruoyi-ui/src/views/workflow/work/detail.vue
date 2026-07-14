@@ -118,6 +118,14 @@
         </el-card>
       </el-tab-pane>
 
+      <el-tab-pane label="后续节点" name="predict">
+        <el-card class="box-card" shadow="never">
+          <process-viewer :key="`predict-${loadIndex}`" :style="'height:' + height" :xml="xmlData"
+                          :finishedInfo="predictInfo"
+          />
+        </el-card>
+      </el-tab-pane>
+
       <el-tab-pane label="流程跟踪" name="track">
         <el-card class="box-card" shadow="never">
           <process-viewer :key="`designer-${loadIndex}`" :style="'height:' + height" :xml="xmlData"
@@ -261,6 +269,8 @@ export default {
         rejectedTaskSet: []
       },
       historyProcNodeList: [],
+      // 发起时预演确定的后续会执行节点列表
+      predictNodeList: [],
       // 部门名称
       deptName: undefined,
       // 部门树选项
@@ -433,6 +443,7 @@ export default {
           this.taskFormData = data.taskFormData;
         }
         this.historyProcNodeList = data.historyProcNodeList;
+        this.predictNodeList = data.predictNodeList || [];
         this.finishedInfo = data.flowViewer;
         this.formOpen = true
       })
