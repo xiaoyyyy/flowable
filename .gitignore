@@ -41,6 +41,14 @@ nbdist/
 *.xml.versionsBackup
 *.swp
 
+### macOS ###
+.DS_Store
+
+### 前端依赖与构建产物（防止再次误提交） ###
+/ruoyi-ui/node_modules/
+/ruoyi-ui/dist/
+/ruoyi-ui/归档.zip
+
 !*/build/*.java
 !*/build/*.html
 !*/build/*.xml
