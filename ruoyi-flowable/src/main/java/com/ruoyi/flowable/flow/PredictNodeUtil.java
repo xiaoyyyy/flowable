@@ -49,6 +49,253 @@ public class PredictNodeUtil {
     }
 
     /**
+     * 展示节点类型：开始事件
+     */
+    public static final String TYPE_START = "startEvent";
+    /**
+     * 展示节点类型：用户任务
+     */
+    public static final String TYPE_USER_TASK = "userTask";
+    /**
+     * 展示节点类型：结束事件
+     */
+    public static final String TYPE_END = "endEvent";
+
+    /**
+     * 预演展示节点，携带层级信息用于体现并行关系。
+     */
+    public static class PredictNode {
+        /**
+         * 节点 Key（BPMN 元素 id）
+         */
+        private final String nodeKey;
+        /**
+         * 节点名称
+         */
+        private final String nodeName;
+        /**
+         * 节点类型：startEvent / userTask / endEvent
+         */
+        private final String nodeType;
+        /**
+         * 是否为多实例（会签/或签）节点
+         */
+        private final boolean multiInstance;
+        /**
+         * 层级（从 0 开始，同层级节点为并行关系）
+         */
+        private int level;
+        /**
+         * 是否与同层级其它节点并行
+         */
+        private boolean parallel;
+
+        public PredictNode(String nodeKey, String nodeName, String nodeType, boolean multiInstance) {
+            this.nodeKey = nodeKey;
+            this.nodeName = nodeName;
+            this.nodeType = nodeType;
+            this.multiInstance = multiInstance;
+        }
+
+        public String getNodeKey() {
+            return nodeKey;
+        }
+
+        public String getNodeName() {
+            return nodeName;
+        }
+
+        public String getNodeType() {
+            return nodeType;
+        }
+
+        public boolean isMultiInstance() {
+            return multiInstance;
+        }
+
+        public int getLevel() {
+            return level;
+        }
+
+        public boolean isParallel() {
+            return parallel;
+        }
+    }
+
+    /**
+     * 预演流程线：收集会执行到的展示节点（开始事件 / 用户任务 / 结束事件），
+     * 并按“从开始节点到该节点的最长路径”计算层级(level)，同层级节点即为并行关系。
+     *
+     * @param bpmnModel 流程模型
+     * @param variables 发起时的流程变量
+     * @return 含层级的展示节点列表（按 level 升序、同层保持经过顺序）
+     */
+    public static List<PredictNode> predictLine(BpmnModel bpmnModel, Map<String, Object> variables) {
+        if (bpmnModel == null) {
+            return new ArrayList<>();
+        }
+        Map<String, Object> vars = variables == null ? new HashMap<>() : variables;
+        Process process = bpmnModel.getMainProcess();
+        Collection<FlowElement> flowElements = process.getFlowElements();
+        StartEvent startEvent = findStartEvent(flowElements);
+        if (startEvent == null) {
+            return new ArrayList<>();
+        }
+        LineContext ctx = new LineContext(vars, flowElements);
+        // 开始节点作为首个展示节点
+        ctx.nodeMap.put(startEvent.getId(),
+            new PredictNode(startEvent.getId(), startEvent.getName(), TYPE_START, false));
+        walkLine(startEvent, startEvent.getId(), ctx);
+        return buildLeveledNodes(ctx);
+    }
+
+    /**
+     * 分层预演的遍历上下文。
+     */
+    private static class LineContext {
+        final Map<String, Object> variables;
+        final Collection<FlowElement> flowElements;
+        /**
+         * 展示节点，保持首次经过顺序
+         */
+        final Map<String, PredictNode> nodeMap = new LinkedHashMap<>();
+        /**
+         * 展示节点反向边：to -> sources，用于层级计算
+         */
+        final Map<String, Set<String>> reverseEdges = new HashMap<>();
+        /**
+         * 已走过的连线 id，去重与循环检测
+         */
+        final Set<String> visitedFlows = new HashSet<>();
+
+        LineContext(Map<String, Object> variables, Collection<FlowElement> flowElements) {
+            this.variables = variables;
+            this.flowElements = flowElements;
+        }
+    }
+
+    /**
+     * 分层预演遍历：在收集展示节点的同时记录展示节点之间的有向边。
+     *
+     * @param current       当前流程元素
+     * @param fromDisplayId 到达当前元素前最近经过的展示节点 id
+     * @param ctx           遍历上下文
+     */
+    private static void walkLine(FlowElement current, String fromDisplayId, LineContext ctx) {
+        if (current == null) {
+            return;
+        }
+        // 结束节点：若在子流程内则跳到子流程节点继续，否则终止
+        if (current instanceof EndEvent) {
+            SubProcess subProcess = getSubProcess(ctx.flowElements, current);
+            if (subProcess != null) {
+                current = subProcess;
+            } else {
+                return;
+            }
+        }
+        List<SequenceFlow> outgoingFlows = getOutgoingFlows(current);
+        if (outgoingFlows == null || outgoingFlows.isEmpty()) {
+            return;
+        }
+        List<SequenceFlow> selectedFlows = chooseOutgoingFlows(current, outgoingFlows, ctx.variables);
+        if (selectedFlows.isEmpty()) {
+            throw new RuntimeException("流程节点配置错误,无后续节点流转");
+        }
+        if (!(current instanceof ParallelGateway || current instanceof InclusiveGateway) && selectedFlows.size() > 1) {
+            throw new RuntimeException("流程节点配置错误,节点后续流转有多个，不符合条件");
+        }
+        for (SequenceFlow sequenceFlow : selectedFlows) {
+            // 防止循环
+            if (!ctx.visitedFlows.add(sequenceFlow.getId())) {
+                continue;
+            }
+            FlowElement next = getFlowElementById(sequenceFlow.getTargetRef(), ctx.flowElements);
+            if (next == null) {
+                continue;
+            }
+            if (next instanceof UserTask) {
+                boolean isNew = !ctx.nodeMap.containsKey(next.getId());
+                if (isNew) {
+                    ctx.nodeMap.put(next.getId(), new PredictNode(next.getId(), next.getName(),
+                        TYPE_USER_TASK, ((UserTask) next).getLoopCharacteristics() != null));
+                }
+                addEdge(ctx, fromDisplayId, next.getId());
+                // 已存在节点其后续已遍历过，无需重复
+                if (isNew) {
+                    walkLine(next, next.getId(), ctx);
+                }
+            } else if (next instanceof EndEvent && next.getParentContainer() instanceof Process) {
+                // 主流程结束节点：记录为展示节点（子流程结束节点不展示）
+                boolean isNew = !ctx.nodeMap.containsKey(next.getId());
+                if (isNew) {
+                    ctx.nodeMap.put(next.getId(),
+                        new PredictNode(next.getId(), next.getName(), TYPE_END, false));
+                }
+                addEdge(ctx, fromDisplayId, next.getId());
+            } else {
+                // 网关、服务任务、子流程开始/结束节点等中间节点，透传最近展示节点继续遍历
+                walkLine(next, fromDisplayId, ctx);
+            }
+        }
+    }
+
+    private static void addEdge(LineContext ctx, String from, String to) {
+        if (from == null || to == null || from.equals(to)) {
+            return;
+        }
+        ctx.reverseEdges.computeIfAbsent(to, k -> new LinkedHashSet<>()).add(from);
+    }
+
+    /**
+     * 计算层级并标记并行，输出有序展示节点列表。
+     */
+    private static List<PredictNode> buildLeveledNodes(LineContext ctx) {
+        Map<String, Integer> levelCache = new HashMap<>();
+        for (String nodeId : ctx.nodeMap.keySet()) {
+            computeLevel(nodeId, ctx.reverseEdges, levelCache, new HashSet<>());
+        }
+        Map<Integer, Integer> levelCount = new HashMap<>();
+        for (PredictNode node : ctx.nodeMap.values()) {
+            node.level = levelCache.getOrDefault(node.getNodeKey(), 0);
+            levelCount.merge(node.level, 1, Integer::sum);
+        }
+//        for (PredictNode node : ctx.nodeMap.values()) {
+//            node.parallel = levelCount.getOrDefault(node.level, 0) > 1;
+//        }
+        List<PredictNode> ordered = new ArrayList<>(ctx.nodeMap.values());
+        ordered.sort(Comparator.comparingInt(PredictNode::getLevel));
+        return ordered;
+    }
+
+    /**
+     * 记忆化计算节点层级：level = 前驱节点层级最大值 + 1，无前驱为 0。
+     * 使用 visiting 集合检测环，遇环忽略该前驱贡献。
+     */
+    private static int computeLevel(String nodeId, Map<String, Set<String>> reverseEdges,
+                                    Map<String, Integer> levelCache, Set<String> visiting) {
+        Integer cached = levelCache.get(nodeId);
+        if (cached != null) {
+            return cached;
+        }
+        Set<String> preds = reverseEdges.get(nodeId);
+        if (preds == null || preds.isEmpty()) {
+            levelCache.put(nodeId, 0);
+            return 0;
+        }
+        if (!visiting.add(nodeId)) {
+            return 0;
+        }
+        int max = 0;
+        for (String pred : preds) {
+            max = Math.max(max, computeLevel(pred, reverseEdges, levelCache, visiting) + 1);
+        }
+        visiting.remove(nodeId);
+        levelCache.put(nodeId, max);
+        return max;
+    }
+
+    /**
      * 深度遍历流程节点。
      *
      * @param current              当前节点

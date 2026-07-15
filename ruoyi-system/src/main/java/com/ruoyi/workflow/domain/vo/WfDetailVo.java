@@ -2,6 +2,7 @@ package com.ruoyi.workflow.domain.vo;
 
 import cn.hutool.core.util.ObjectUtil;
 import com.ruoyi.flowable.core.FormConf;
+import com.ruoyi.flowable.flow.WfNextNodeVo;
 import lombok.Data;
 
 import java.util.List;

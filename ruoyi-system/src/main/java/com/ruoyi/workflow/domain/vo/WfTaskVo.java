@@ -94,6 +94,14 @@ public class WfTaskVo implements Serializable {
      */
     private String procInsId;
     /**
+     * 业务编号
+     */
+    private String businessKey;
+    /**
+     * 业务编号
+     */
+    private String procInstanceName;
+    /**
      * 历史流程实例ID
      */
     private String hisProcInsId;

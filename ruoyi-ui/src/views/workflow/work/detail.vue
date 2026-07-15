@@ -120,9 +120,28 @@
 
       <el-tab-pane label="后续节点" name="predict">
         <el-card class="box-card" shadow="never">
-          <process-viewer :key="`predict-${loadIndex}`" :style="'height:' + height" :xml="xmlData"
-                          :finishedInfo="predictInfo"
-          />
+          <div slot="header" class="clearfix">
+            <span>预演流程线（根据发起时提交的数据计算，同层为并行节点）</span>
+          </div>
+          <div v-if="predictNodeList && predictNodeList.length > 0" class="predict-line">
+            <template v-for="(group, gi) in predictLevels">
+              <div class="predict-level" :key="`lvl-${gi}`">
+                <el-tag v-if="group.length > 1" class="predict-parallel-tag" size="mini" type="warning">并行</el-tag>
+                <div class="predict-nodes">
+                  <div class="predict-node" v-for="(node, ni) in group" :key="ni">
+                    <el-tag :type="nodeTagType(node.nodeType)" effect="dark" size="medium">
+                      {{ node.nodeName || nodeTypeLabel(node.nodeType) }}
+                    </el-tag>
+                    <div v-if="node.multiInstance" class="predict-node-tip">会签/多实例</div>
+                  </div>
+                </div>
+              </div>
+              <div class="predict-arrow" v-if="gi < predictLevels.length - 1" :key="`arr-${gi}`">
+                <i class="el-icon-bottom"></i>
+              </div>
+            </template>
+          </div>
+          <p v-else style="text-align: center; color: #909399;">暂无预演的后续节点</p>
         </el-card>
       </el-tab-pane>
 
@@ -254,6 +273,17 @@ export default {
           case '7': return 'info'
         }
       }
+    },
+    // 后续节点按层级分组（同一层级为并行节点）
+    predictLevels() {
+      const groups = {};
+      (this.predictNodeList || []).forEach(node => {
+        const lv = node.level != null ? node.level : 0;
+        (groups[lv] = groups[lv] || []).push(node);
+      });
+      return Object.keys(groups)
+        .sort((a, b) => Number(a) - Number(b))
+        .map(key => groups[key]);
     }
   },
   data() {
@@ -376,6 +406,22 @@ export default {
         return "#2bc418";
       } else {
         return "#b3bdbb";
+      }
+    },
+    // 预演节点标签颜色
+    nodeTagType(type) {
+      switch (type) {
+        case 'startEvent': return 'success';
+        case 'endEvent': return 'info';
+        default: return 'primary';
+      }
+    },
+    // 预演节点默认名称
+    nodeTypeLabel(type) {
+      switch (type) {
+        case 'startEvent': return '开始';
+        case 'endEvent': return '结束';
+        default: return '审批节点';
       }
     },
     // 多选框选中数据
@@ -661,5 +707,43 @@ export default {
 
 .button-new-tag {
   margin-left: 10px;
+}
+
+.predict-line {
+  padding: 10px 0;
+
+  .predict-level {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+
+    .predict-parallel-tag {
+      margin-bottom: 6px;
+    }
+
+    .predict-nodes {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+
+      .predict-node {
+        text-align: center;
+        margin: 0 8px;
+
+        .predict-node-tip {
+          font-size: 12px;
+          color: #909399;
+          margin-top: 4px;
+        }
+      }
+    }
+  }
+
+  .predict-arrow {
+    text-align: center;
+    color: #c0c4cc;
+    font-size: 20px;
+    margin: 6px 0;
+  }
 }
 </style>

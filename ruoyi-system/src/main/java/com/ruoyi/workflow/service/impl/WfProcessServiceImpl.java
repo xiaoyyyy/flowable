@@ -27,6 +27,7 @@ import com.ruoyi.flowable.core.domain.ProcessQuery;
 import com.ruoyi.flowable.factory.FlowServiceFactory;
 import com.ruoyi.flowable.flow.FlowableUtils;
 import com.ruoyi.flowable.flow.PredictNodeUtil;
+import com.ruoyi.flowable.flow.WfNextNodeVo;
 import com.ruoyi.flowable.utils.ModelUtils;
 import com.ruoyi.flowable.utils.ProcessFormUtils;
 import com.ruoyi.flowable.utils.ProcessUtils;
@@ -188,7 +189,8 @@ public class WfProcessServiceImpl extends FlowServiceFactory implements IWfProce
             taskVo.setCreateTime(hisIns.getStartTime());
             taskVo.setFinishTime(hisIns.getEndTime());
             taskVo.setProcInsId(hisIns.getId());
-
+            taskVo.setBusinessKey(hisIns.getBusinessKey());
+            taskVo.setProcInstanceName(hisIns.getName());
             // 计算耗时
             if (Objects.nonNull(hisIns.getEndTime())) {
                 taskVo.setDuration(DateUtils.getDatePoor(hisIns.getEndTime(), hisIns.getStartTime()));
@@ -706,7 +708,13 @@ public class WfProcessServiceImpl extends FlowServiceFactory implements IWfProce
         variables.put(ProcessConstants.PROCESS_PREDICT_NODES_KEY,
             JsonUtils.toJsonString(buildPredictNodes(procDef.getId(), variables)));
         // 发起流程实例
-        ProcessInstance processInstance = runtimeService.startProcessInstanceByKeyAndTenantId(procDef.getKey(), variables,"AMS");
+        ProcessInstance processInstance = runtimeService.createProcessInstanceBuilder()
+                .processDefinitionKey(procDef.getKey())
+                .name(procDef.getName() + userIdStr)
+                .businessKey("LC-"+System.currentTimeMillis())
+                .tenantId("AMS")
+                .variables(variables)
+                .start();
         // 第一个用户任务为发起人，则自动完成任务
         wfTaskService.startFirstTask(processInstance, variables);
     }
@@ -721,12 +729,17 @@ public class WfProcessServiceImpl extends FlowServiceFactory implements IWfProce
     private List<WfNextNodeVo> buildPredictNodes(String procDefId, Map<String, Object> variables) {
         List<WfNextNodeVo> nodes = new ArrayList<>();
         BpmnModel bpmnModel = repositoryService.getBpmnModel(procDefId);
-        List<UserTask> userTasks = PredictNodeUtil.predict(bpmnModel, variables);
-        for (UserTask userTask : userTasks) {
+        List<PredictNodeUtil.PredictNode> predictNodes = PredictNodeUtil.predictLine(bpmnModel, variables);
+        int sort = 1;
+        for (PredictNodeUtil.PredictNode node : predictNodes) {
             WfNextNodeVo vo = new WfNextNodeVo();
-            vo.setNodeKey(userTask.getId());
-            vo.setNodeName(userTask.getName());
-            vo.setMultiInstance(userTask.getLoopCharacteristics() != null);
+            vo.setSortOrder(sort++);
+            vo.setLevel(node.getLevel());
+//            vo.setParallel(node.isParallel());
+            vo.setNodeType(node.getNodeType());
+            vo.setNodeKey(node.getNodeKey());
+            vo.setNodeName(node.getNodeName());
+            vo.setMultiInstance(node.isMultiInstance());
             nodes.add(vo);
         }
         return nodes;
