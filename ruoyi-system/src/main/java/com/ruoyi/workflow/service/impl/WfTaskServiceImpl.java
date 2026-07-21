@@ -432,6 +432,67 @@ public class WfTaskServiceImpl extends FlowServiceFactory implements IWfTaskServ
     }
 
     /**
+     * 加签：将指定用户动态加入当前多实例（会签/或签）节点。
+     * <p>
+     * 实现要点：
+     * 1. 通过 {@code runtimeService.addMultiInstanceExecution} 向当前节点新增实例，
+     *    新实例自动继承该节点的多实例类型（会签=串行 / 或签=并行）及其 completionCondition，
+     *    因此无需针对会签/或签分别处理；
+     * 2. 加签仅新增实例，不影响当前用户任务，当前用户可继续审批；
+     * 3. 或签（completionCondition 为 ${nrOfCompletedInstances > 0}）场景下，当前用户完成后
+     *    条件即满足，引擎会自动结束该多实例节点并删除加签用户的未完成任务，实现"加签人免审"。
+     *
+     * @param bo 请求实体参数
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void addMultiInstance(WfTaskBo bo) {
+        // 当前任务
+        Task task = taskService.createTaskQuery().taskId(bo.getTaskId()).singleResult();
+        if (ObjectUtil.isEmpty(task)) {
+            throw new ServiceException("获取任务失败！");
+        }
+        if (task.isSuspended()) {
+            throw new ServiceException("任务处于挂起状态，无法加签");
+        }
+        if (StringUtils.isBlank(bo.getUserId())) {
+            throw new ServiceException("请选择加签人员");
+        }
+        // 校验当前节点是否为多实例（会签/或签）节点
+        BpmnModel bpmnModel = repositoryService.getBpmnModel(task.getProcessDefinitionId());
+        if (!ModelUtils.isMultiInstance(bpmnModel, task.getTaskDefinitionKey())) {
+            throw new ServiceException("当前节点不是会签/或签节点，无法加签");
+        }
+        // 读取多实例节点的元素变量名（默认约定为 assignee）
+        UserTask userTask = ModelUtils.getUserTaskByKey(bpmnModel, task.getTaskDefinitionKey());
+        String elementVariable = BpmnXMLConstants.ATTRIBUTE_TASK_USER_ASSIGNEE;
+        if (userTask != null && userTask.getLoopCharacteristics() != null
+            && StringUtils.isNotBlank(userTask.getLoopCharacteristics().getElementVariable())) {
+            elementVariable = userTask.getLoopCharacteristics().getElementVariable();
+        }
+
+        identityService.setAuthenticatedUserId(TaskUtils.getUserId());
+        String operator = LoginHelper.getNickName();
+        // 逐个加签
+        for (String assigneeId : bo.getUserId().split(",")) {
+            if (StringUtils.isBlank(assigneeId)) {
+                continue;
+            }
+            // 向当前多实例节点新增一个实例，并指定其审批人
+            Map<String, Object> assignVariables = Collections.singletonMap(elementVariable, assigneeId);
+            runtimeService.addMultiInstanceExecution(task.getTaskDefinitionKey(), task.getProcessInstanceId(), assignVariables);
+            // 记录加签审批意见
+            String nickName = sysUserService.selectNickNameById(Long.parseLong(assigneeId));
+            String comment = StrUtil.format("{} 加签 -> {}{}", operator,
+                StringUtils.isNotBlank(nickName) ? nickName : assigneeId,
+                StringUtils.isNotBlank(bo.getComment()) ? "，意见：" + bo.getComment() : "");
+            taskService.addComment(task.getId(), task.getProcessInstanceId(), FlowComment.ADD_SIGN.getType(), comment);
+        }
+        // 设置任务节点名称
+        bo.setTaskName(task.getName());
+    }
+
+    /**
      * 取消申请
      *
      * @param bo

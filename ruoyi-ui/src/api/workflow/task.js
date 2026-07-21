@@ -27,6 +27,15 @@ export function transfer(data) {
   })
 }
 
+// 加签（加入当前会签/或签节点）
+export function addMultiInstance(data) {
+  return request({
+    url: '/workflow/task/addMultiInstance',
+    method: 'post',
+    data: data
+  })
+}
+
 // 退回任务
 export function returnTask(data) {
   return request({

@@ -57,6 +57,9 @@
               <el-button icon="el-icon-thumb" type="success" @click="handleTransfer">转办</el-button>
             </el-col>
             <el-col :span="1.5">
+              <el-button icon="el-icon-circle-plus-outline" type="primary" @click="handleAddSign">加签</el-button>
+            </el-col>
+            <el-col :span="1.5">
               <el-button icon="el-icon-refresh-left" type="warning" @click="handleReturn">退回</el-button>
             </el-col>
             <el-col :span="1.5">
@@ -233,7 +236,7 @@
 <script>
 import { detailProcess } from '@/api/workflow/process'
 import Parser from '@/utils/generator/parser'
-import { complete, delegate, transfer, rejectTask, returnList, returnTask } from '@/api/workflow/task'
+import { complete, delegate, transfer, rejectTask, returnList, returnTask, addMultiInstance } from '@/api/workflow/task'
 import { selectUser, deptTreeSelect } from '@/api/system/user'
 import ProcessViewer from '@/components/ProcessViewer'
 import '@riophae/vue-treeselect/dist/vue-treeselect.css'
@@ -258,6 +261,7 @@ export default {
           case '5': return '转办'
           case '6': return '终止'
           case '7': return '撤回'
+          case '8': return '加签'
         }
       }
     },
@@ -271,6 +275,7 @@ export default {
           case '5': return 'success'
           case '6': return 'danger'
           case '7': return 'info'
+          case '8': return 'primary'
         }
       }
     },
@@ -557,6 +562,17 @@ export default {
         }
       })
     },
+    /** 加签：将选定用户加入当前会签/或签节点 */
+    handleAddSign() {
+      this.$refs["taskForm"].validate(valid => {
+        if (valid) {
+          this.userData.type = 'addSign';
+          this.userData.title = '加签';
+          this.userData.open = true;
+          this.getTreeSelect();
+        }
+      })
+    },
     /** 拒绝任务 */
     handleReject() {
       this.$refs["taskForm"].validate(valid => {
@@ -640,6 +656,15 @@ export default {
           transfer(this.taskForm).then(res => {
             this.$modal.msgSuccess(res.msg);
             this.goBack();
+          });
+        }
+        if (type === 'addSign') {
+          addMultiInstance(this.taskForm).then(res => {
+            this.$modal.msgSuccess(res.msg);
+            // 加签后当前用户仍需继续审批，不返回列表，关闭弹窗并刷新详情
+            this.userData.open = false;
+            this.currentUserId = null;
+            this.getProcessDetails(this.taskForm.procInsId, this.taskForm.taskId);
           });
         }
       }

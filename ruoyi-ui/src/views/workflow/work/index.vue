@@ -186,7 +186,7 @@ export default {
       //     definitionId: row.definitionId,
       //   }
       // })
-      let val={"contractAmount":999,"signType":"电子签","companyEntity":"什么"};
+      let val={"contractAmount":1000,"signType":"电子签1","companyEntity":"主体"};
       this.startProcess1(row.definitionId,JSON.stringify(val)).then(res=>{
         this.$modal.msgSuccess(res.msg);
         // this.$tab.closeOpenPage({

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  请假审批超时处理流程（边界定时事件 Boundary Timer Event 示例）
+
+  流程走向：
+    开始 → 填写请假申请 → 经理审批
+      ├─ 经理按时审批完成 ────────────────────────→ 正常结束
+      ├─ [非中断定时器 PT4H] 临期提醒（不打断审批）→ 发送催办通知 → 结束(提醒分支)
+      └─ [中断定时器  PT1H] 审批超时（取消原任务）→ 自动升级处理 → 总监审批 → 结束(升级分支)
+
+  关键点：
+    1. boundaryEvent 附着在 managerApprove 用户任务上，任务一创建即开始计时。
+    2. cancelActivity="false" 为非中断：定时器触发时不取消原任务，可重复用于"临期提醒"。
+    3. cancelActivity="true"  为中断：定时器触发时取消原任务，流程流转到升级分支。
+    4. 定时器到点触发依赖 Flowable 异步执行器（async-executor-activate 必须为 true）。
+    5. timeDuration 采用 ISO-8601 时长；示例用固定值，生产可改为表达式如
+       <timeDuration>${escalateDuration}</timeDuration> 由流程变量动态指定。
+-->
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:flowable="http://flowable.org/bpmn"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xsi:schemaLocation="http://www.omg.org/spec/BPMN/20100524/MODEL http://www.omg.org/spec/BPMN/20100524/BPMN20.xsd"
+             typeLanguage="http://www.w3.org/2001/XMLSchema"
+             expressionLanguage="http://www.w3.org/1999/XPath"
+             targetNamespace="http://flowable.org/bpmn">
+
+    <process id="leaveTimeout" name="请假审批超时处理" isExecutable="true">
+
+        <startEvent id="startEvent" name="开始"/>
+
+        <sequenceFlow id="flowStartToFill" sourceRef="startEvent" targetRef="fillApply"/>
+
+        <!-- 发起人填写请假申请 -->
+        <userTask id="fillApply" name="填写请假申请" flowable:assignee="${initiator}"/>
+
+        <sequenceFlow id="flowFillToManager" sourceRef="fillApply" targetRef="managerApprove"/>
+
+        <!-- 经理审批：本节点附着两个边界定时器 -->
+        <userTask id="managerApprove" name="经理审批" flowable:assignee="${manager}"/>
+
+        <!-- 正常审批完成 -->
+        <sequenceFlow id="flowManagerToEnd" sourceRef="managerApprove" targetRef="endNormal"/>
+
+        <!-- 非中断定时器：任务创建 4 小时后临期提醒，不取消原任务 -->
+        <boundaryEvent id="remindTimer" name="临期提醒" attachedToRef="managerApprove" cancelActivity="false">
+            <timerEventDefinition>
+                <timeDuration>PT4H</timeDuration>
+            </timerEventDefinition>
+        </boundaryEvent>
+
+        <sequenceFlow id="flowRemindToService" sourceRef="remindTimer" targetRef="remindService"/>
+
+        <!-- 超时提醒处理（节点 id 含 remind，delegate 据此识别为提醒类型） -->
+        <serviceTask id="remindService" name="发送催办提醒"
+                     flowable:delegateExpression="${timeoutHandleDelegate}"/>
+
+        <sequenceFlow id="flowRemindToEnd" sourceRef="remindService" targetRef="endRemind"/>
+
+        <!-- 中断定时器：任务创建 1 小时后仍未完成则超时，取消原任务并升级 -->
+        <boundaryEvent id="escalateTimer" name="审批超时" attachedToRef="managerApprove" cancelActivity="true">
+            <timerEventDefinition>
+                <timeDuration>PT1H</timeDuration>
+            </timerEventDefinition>
+        </boundaryEvent>
+
+        <sequenceFlow id="flowEscalateToService" sourceRef="escalateTimer" targetRef="escalateService"/>
+
+        <!-- 超时升级自动处理 -->
+        <serviceTask id="escalateService" name="超时升级处理"
+                     flowable:delegateExpression="${timeoutHandleDelegate}"/>
+
+        <sequenceFlow id="flowServiceToDirector" sourceRef="escalateService" targetRef="directorApprove"/>
+
+        <!-- 升级到总监审批 -->
+        <userTask id="directorApprove" name="总监审批" flowable:assignee="${director}"/>
+
+        <sequenceFlow id="flowDirectorToEnd" sourceRef="directorApprove" targetRef="endEscalate"/>
+
+        <endEvent id="endNormal" name="正常结束"/>
+        <endEvent id="endRemind" name="提醒结束"/>
+        <endEvent id="endEscalate" name="升级结束"/>
+
+    </process>
+
+</definitions>

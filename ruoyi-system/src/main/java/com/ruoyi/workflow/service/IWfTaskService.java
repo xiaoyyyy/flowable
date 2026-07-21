@@ -81,6 +81,14 @@ public interface IWfTaskService {
     void transferTask(WfTaskBo bo);
 
     /**
+     * 加签：将指定用户动态加入当前多实例（会签/或签）节点，继承该节点的会签/或签形式。
+     * 当前用户可继续审批；或签场景下当前用户完成后，加签用户的任务将由引擎自动结束。
+     *
+     * @param bo 请求实体参数（taskId 当前任务、userId 加签人，多个以逗号分隔）
+     */
+    void addMultiInstance(WfTaskBo bo);
+
+    /**
      * 取消申请
      * @param bo
      * @return

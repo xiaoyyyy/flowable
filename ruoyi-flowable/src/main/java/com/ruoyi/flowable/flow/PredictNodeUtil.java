@@ -5,6 +5,7 @@ import com.googlecode.aviator.Expression;
 import com.ruoyi.common.utils.StringUtils;
 import org.flowable.bpmn.model.Process;
 import org.flowable.bpmn.model.*;
+import org.flowable.engine.impl.el.UelExpressionCondition;
 
 import java.util.*;
 
@@ -20,6 +21,13 @@ import java.util.*;
  * @author kiro
  */
 public class PredictNodeUtil {
+
+    /**
+     * Aviator 不支持对象方法调用语法，需要将 field.contains(value)
+     * 转换为其内置函数 string.contains(field, value)。
+     */
+    private static final java.util.regex.Pattern CONTAINS_METHOD_PATTERN = java.util.regex.Pattern.compile(
+        "(?<![\\w$.])([A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*)\\s*\\.\\s*contains\\s*\\(");
 
     /**
      * 预演流程，收集会执行到的用户任务节点（按顺序、已去重）。
@@ -398,7 +406,7 @@ public class PredictNodeUtil {
                 selected.add(flow);
             }
         }
-        return selected.isEmpty() ? defaultSelected : selected;
+        return selected.size() != 1 ? defaultSelected : selected;
     }
 
     /**
@@ -454,16 +462,109 @@ public class PredictNodeUtil {
      * 计算条件表达式（形如 ${amount > 1000}），计算异常时按不通过处理，避免中断预演。
      */
     private static boolean evaluate(Map<String, Object> variables, String expression) {
+        return FlowExpressionEvaluateUtil.evaluate(variables, expression);
+    }
+
+    /**
+     * 使用 Flowable 内部的 UEL 条件实现判断表达式。
+     * <p>
+     * 当前预演阶段没有真实的流程执行实例，因此使用只读的 Map-backed DelegateExecution
+     * 提供变量；现有 Aviator evaluate 方法及其调用链保持不变。
+     *
+     * @param variables 变量
+     * @param expression UEL 表达式，支持 ${...}、#{...} 或省略外层标记
+     * @return 表达式结果；表达式异常或结果不是 Boolean 时返回 false
+     */
+    public static boolean evaluateByFlowable(Map<String, Object> variables, String expression) {
+        if (StringUtils.isBlank(expression)) {
+            return false;
+        }
         try {
-            int start = expression.lastIndexOf("{");
-            int end = expression.lastIndexOf("}");
-            String realExpr = (start >= 0 && end > start) ? expression.substring(start + 1, end) : expression;
-            Expression exp = AviatorEvaluator.compile(realExpr, true);
-            Object execute = exp.execute(variables);
-            return Boolean.parseBoolean(String.valueOf(execute));
+            String uelExpression = expression.trim();
+            if (!(uelExpression.startsWith("${") || uelExpression.startsWith("#{"))) {
+                uelExpression = "${" + uelExpression + "}";
+            }
+            Map<String, Object> evaluationVariables = variables == null
+                ? Collections.emptyMap() : new HashMap<>(variables);
+            org.flowable.engine.delegate.DelegateExecution execution =
+                (org.flowable.engine.delegate.DelegateExecution) java.lang.reflect.Proxy.newProxyInstance(
+                    PredictNodeUtil.class.getClassLoader(),
+                    new Class<?>[]{org.flowable.engine.delegate.DelegateExecution.class},
+                    (proxy, method, args) -> {
+                        String methodName = method.getName();
+                        if ("hasVariable".equals(methodName) || "hasVariableLocal".equals(methodName)) {
+                            return evaluationVariables.containsKey(args[0]);
+                        }
+                        if ("getVariable".equals(methodName) || "getVariableLocal".equals(methodName)) {
+                            return evaluationVariables.get(args[0]);
+                        }
+                        if ("getTenantId".equals(methodName)) {
+                            return null;
+                        }
+                        if ("toString".equals(methodName)) {
+                            return "MapBackedDelegateExecution";
+                        }
+                        if ("hashCode".equals(methodName)) {
+                            return System.identityHashCode(proxy);
+                        }
+                        if ("equals".equals(methodName)) {
+                            return proxy == args[0];
+                        }
+                        throw new UnsupportedOperationException("预演执行上下文不支持方法: " + methodName);
+                    });
+            org.flowable.engine.impl.el.ProcessExpressionManager expressionManager =
+                new org.flowable.engine.impl.el.ProcessExpressionManager(Collections.emptyMap());
+            org.flowable.common.engine.api.delegate.Expression flowableExpression =
+                expressionManager.createExpression(uelExpression);
+            UelExpressionCondition condition = new UelExpressionCondition(flowableExpression);
+            return condition.evaluate("predict", execution);
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /**
+     * 将 UEL/Java 风格的对象 contains 调用转换为 Aviator 内置字符串函数。
+     * 字符串字面量中的相同文本不会被改写，已经是 string.contains 的表达式也保持不变。
+     */
+    private static String normalizeContainsMethods(String expression) {
+        java.util.regex.Matcher matcher = CONTAINS_METHOD_PATTERN.matcher(expression);
+        StringBuffer result = new StringBuffer();
+        while (matcher.find()) {
+            String receiver = matcher.group(1);
+            if ("string".equals(receiver) || isInsideStringLiteral(expression, matcher.start())) {
+                continue;
+            }
+            String replacement = "string.contains(" + receiver + ", ";
+            matcher.appendReplacement(result, java.util.regex.Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
+    /**
+     * 判断指定位置是否处于单引号或双引号字符串字面量中。
+     */
+    private static boolean isInsideStringLiteral(String expression, int index) {
+        char quote = 0;
+        boolean escaped = false;
+        for (int i = 0; i < index; i++) {
+            char current = expression.charAt(i);
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (quote != 0) {
+                if (current == '\\') {
+                    escaped = true;
+                } else if (current == quote) {
+                    quote = 0;
+                }
+            } else if (current == '\'' || current == '"') {
+                quote = current;
+            }
+        }
+        return quote != 0;
     }
 
     /**

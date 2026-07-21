@@ -158,6 +158,19 @@ public class WfTaskController {
     }
 
     /**
+     * 加签：将指定用户加入当前会签/或签节点
+     */
+    @PostMapping(value = "/addMultiInstance")
+    @SaCheckPermission("workflow:process:approval")
+    public R addMultiInstance(@RequestBody WfTaskBo bo) {
+        if (ObjectUtil.hasNull(bo.getTaskId(), bo.getUserId())) {
+            return R.fail("参数错误！");
+        }
+        flowTaskService.addMultiInstance(bo);
+        return R.ok();
+    }
+
+    /**
      * 生成流程图
      *
      * @param processId 任务ID

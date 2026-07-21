@@ -1,5 +1,6 @@
 package com.ruoyi.flowable.flow;
 
+import com.ruoyi.flowable.flow.agenda.MultiMatchDefaultFlowableEngineAgendaFactory;
 import org.flowable.spring.SpringProcessEngineConfiguration;
 import org.flowable.spring.boot.EngineConfigurationConfigurer;
 import org.springframework.context.annotation.Configuration;
@@ -17,6 +18,7 @@ public class FlowableConfig implements EngineConfigurationConfigurer<SpringProce
         engineConfiguration.setActivityFontName("宋体");
         engineConfiguration.setLabelFontName("宋体");
         engineConfiguration.setAnnotationFontName("宋体");
+        engineConfiguration.setAgendaFactory(new MultiMatchDefaultFlowableEngineAgendaFactory());
 
     }
 }

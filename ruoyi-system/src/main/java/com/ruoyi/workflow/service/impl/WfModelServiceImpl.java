@@ -1,6 +1,7 @@
 package com.ruoyi.workflow.service.impl;
 
 import cn.hutool.core.util.ArrayUtil;
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -17,17 +18,19 @@ import com.ruoyi.workflow.domain.bo.WfModelBo;
 import com.ruoyi.workflow.domain.dto.WfMetaInfoDto;
 import com.ruoyi.workflow.domain.vo.WfFormVo;
 import com.ruoyi.workflow.domain.vo.WfModelVo;
+import com.ruoyi.workflow.mapper.WfModelMapper;
 import com.ruoyi.workflow.service.IWfDeployFormService;
 import com.ruoyi.workflow.service.IWfFormService;
 import com.ruoyi.workflow.service.IWfModelService;
+import com.ruoyi.workflow.utils.ProcessValidatorUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.flowable.bpmn.model.BpmnModel;
-import org.flowable.bpmn.model.StartEvent;
 import org.flowable.engine.repository.Deployment;
 import org.flowable.engine.repository.Model;
 import org.flowable.engine.repository.ModelQuery;
 import org.flowable.engine.repository.ProcessDefinition;
+import org.flowable.validation.ValidationError;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -47,6 +50,7 @@ public class WfModelServiceImpl extends FlowServiceFactory implements IWfModelSe
 
     private final IWfFormService formService;
     private final IWfDeployFormService deployFormService;
+    private final WfModelMapper modelMapper;
 
     @Override
     public TableDataInfo<WfModelVo> list(WfModelBo modelBo, PageQuery pageQuery) {
@@ -128,9 +132,9 @@ public class WfModelServiceImpl extends FlowServiceFactory implements IWfModelSe
     @Override
     public TableDataInfo<WfModelVo> historyList(WfModelBo modelBo, PageQuery pageQuery) {
         ModelQuery modelQuery = repositoryService.createModelQuery()
-            .modelKey(modelBo.getModelKey())
-            .orderByModelVersion()
-            .desc();
+                .modelKey(modelBo.getModelKey())
+                .orderByModelVersion()
+                .desc();
         // 执行查询（不显示最新版，-1）
         long pageTotal = modelQuery.count() - 1;
         if (pageTotal <= 0) {
@@ -219,7 +223,7 @@ public class WfModelServiceImpl extends FlowServiceFactory implements IWfModelSe
             throw new RuntimeException("流程模型不存在！");
         }
         model.setCategory(modelBo.getCategory());
-        model.setName("节点监听1");
+        model.setName(modelBo.getModelName());
         WfMetaInfoDto metaInfoDto = JsonUtils.parseObject(model.getMetaInfo(), WfMetaInfoDto.class);
         String metaInfo = buildMetaInfo(metaInfoDto, modelBo.getDescription());
         model.setMetaInfo(metaInfo);
@@ -240,10 +244,12 @@ public class WfModelServiceImpl extends FlowServiceFactory implements IWfModelSe
             throw new RuntimeException("获取模型设计失败！");
         }
         String processName = bpmnModel.getMainProcess().getName();
-        // 获取开始节点
-        StartEvent startEvent = ModelUtils.getStartEvent(bpmnModel);
-        if (ObjectUtil.isNull(startEvent)) {
-            throw new RuntimeException("开始节点不存在，请检查流程设计是否有误！");
+
+        // 流程校验：开始/结束节点数量 + Flowable 引擎校验，统一输出中文错误
+        List<ValidationError> validationErrors = repositoryService.validateProcess(bpmnModel);
+        List<String> errorMessages = ProcessValidatorUtils.validate(bpmnModel, validationErrors);
+        if (CollUtil.isNotEmpty(errorMessages)) {
+            throw new RuntimeException("流程校验不通过：" + String.join("；", errorMessages));
         }
         // 获取开始节点配置的表单Key
         // 去掉开始节点的表单key
@@ -279,10 +285,10 @@ public class WfModelServiceImpl extends FlowServiceFactory implements IWfModelSe
             throw new RuntimeException("流程模型不存在！");
         }
         Integer latestVersion = repositoryService.createModelQuery()
-            .modelKey(model.getKey())
-            .latestVersion()
-            .singleResult()
-            .getVersion();
+                .modelKey(model.getKey())
+                .latestVersion()
+                .singleResult()
+                .getVersion();
         if (model.getVersion().equals(latestVersion)) {
             throw new RuntimeException("当前版本已是最新版！");
         }
@@ -330,23 +336,31 @@ public class WfModelServiceImpl extends FlowServiceFactory implements IWfModelSe
         String processName = model.getName() + ProcessConstants.SUFFIX;
         // 部署流程
         Deployment deployment = repositoryService.createDeployment()
-            .name(model.getName())
-            .key(model.getKey())
-            .category(model.getCategory())
-            .addBytes(processName, bpmnBytes)
-            .tenantId(tenantId)
-            .deploy();
+                .name(model.getName())
+                .key(model.getKey())
+                .category(model.getCategory())
+                .addBytes(processName, bpmnBytes)
+                .tenantId(tenantId)
+                .deploy();
         ProcessDefinition procDef = repositoryService.createProcessDefinitionQuery()
-            .deploymentId(deployment.getId())
-            .singleResult();
+                .deploymentId(deployment.getId())
+                .singleResult();
         // 修改流程定义的分类，便于搜索流程
         repositoryService.setProcessDefinitionCategory(procDef.getId(), model.getCategory());
+        // 同步模型描述到流程定义
+        WfMetaInfoDto metaInfo = JsonUtils.parseObject(model.getMetaInfo(), WfMetaInfoDto.class);
+        String description = ObjectUtil.isNull(metaInfo) ? null : metaInfo.getDescription();
+        int updatedRows = modelMapper.updateProcessDefinitionDescription(procDef.getId(), description);
+        if (updatedRows != 1) {
+            throw new RuntimeException("修改流程定义描述失败！");
+        }
         // 保存部署表单
         return deployFormService.saveInternalDeployForm(deployment.getId(), bpmnModel);
     }
 
     /**
      * 构建模型扩展信息
+     *
      * @return
      */
     private String buildMetaInfo(WfMetaInfoDto metaInfo, String description) {

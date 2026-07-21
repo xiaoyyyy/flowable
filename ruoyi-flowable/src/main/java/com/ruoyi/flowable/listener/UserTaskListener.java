@@ -1,7 +1,6 @@
 package com.ruoyi.flowable.listener;
 
 import cn.hutool.core.util.StrUtil;
-import com.ruoyi.common.utils.spring.SpringUtils;
 import com.ruoyi.flowable.utils.ModelUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.flowable.bpmn.model.BpmnModel;

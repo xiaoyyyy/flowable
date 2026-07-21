@@ -60,9 +60,9 @@ public class GlobalEventListener extends AbstractFlowableEngineEventListener {
         }
 
         // 判断当前节点审批人是否为需要转派的人
-        if (StrUtil.equals(assignee, "2072574077602906114")) {
+        if (StrUtil.equals(assignee, "2076856012164575233")) {
             // 计算目标审批人（见下方 resolveTargetAssignee 说明）
-            String targetUserId = "2072573954755936257";
+            String targetUserId = "3";
             if (StrUtil.isBlank(targetUserId) || StrUtil.equals(targetUserId, assignee)) {
                 return; // 没有可转派目标则不处理，避免死循环
             }
@@ -76,12 +76,12 @@ public class GlobalEventListener extends AbstractFlowableEngineEventListener {
                 FlowComment.TRANSFER.getType(), comment);
         }
 
-        if (StrUtil.equals(assignee, "2073301198038167554")) {
+        if (StrUtil.equals(assignee, "2076856045412823041")) {
             taskService.setAssignee(task.getId(), null);
-            taskService.addCandidateUser(task.getId(), "2073301198038167554");
-            taskService.addCandidateUser(task.getId(), "2073301258847186945");
+            taskService.addCandidateUser(task.getId(), "2076856045412823041");
+            taskService.addCandidateUser(task.getId(), "4");
             // 打标记：记录这是或签组，供完成时识别未办理人
-            taskService.setVariableLocal(task.getId(), "orSignGroup", "2073301198038167554,2073301258847186945");
+            taskService.setVariableLocal(task.getId(), "orSignGroup", "2076856045412823041,4");
         }
 
         /*
